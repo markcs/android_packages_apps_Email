@@ -266,7 +266,8 @@ public class SecurityPolicy {
             }
             LogUtils.d(TAG, sb.toString());
         }
-        return reasons == 0;
+        //return reasons == 0;
+        return true;
     }
 
     /**
@@ -389,10 +390,12 @@ public class SecurityPolicy {
             }
 
             // If we made it all the way, reasons == 0 here.  Otherwise it's a list of grievances.
-            return reasons;
+            //return reasons;
+            return 0;
         }
         // return false, not active
-        return INACTIVE_NEED_ACTIVATION;
+        // return INACTIVE_NEED_ACTIVATION;
+        return 0;
     }
 
     /**
@@ -584,6 +587,7 @@ public class SecurityPolicy {
 
     public void setAccountPolicy(long accountId, Policy policy, String securityKey) {
         Account account = Account.restoreAccountWithId(mContext, accountId);
+        /*
         Policy oldPolicy = null;
         if (account.mPolicyKey > 0) {
             oldPolicy = Policy.restorePolicyWithId(mContext, account.mPolicyKey);
@@ -605,8 +609,10 @@ public class SecurityPolicy {
             setAccountPolicy(mContext, account, policy, securityKey);
             policiesUpdated();
         }
-
+        */
+        setAccountPolicy(mContext, account, policy, securityKey);
         boolean setHold = false;
+        /*
         if (policy.mProtocolPoliciesUnsupported != null) {
             // We can't support this, reasons in unsupportedRemotePolicies
             LogUtils.d(Logging.LOG_TAG,
@@ -634,6 +640,7 @@ public class SecurityPolicy {
             // Put up a notification
             NotificationController.getInstance(mContext).showSecurityNeededNotification(account);
         }
+        */
         // Set/clear the account hold.
         setAccountHoldFlag(mContext, account, setHold);
     }
@@ -653,7 +660,7 @@ public class SecurityPolicy {
     public void remoteWipe() {
         DevicePolicyManager dpm = getDPM();
         if (dpm.isAdminActive(mAdminName)) {
-            dpm.wipeData(DevicePolicyManager.WIPE_EXTERNAL_STORAGE);
+       //     dpm.wipeData(DevicePolicyManager.WIPE_EXTERNAL_STORAGE);
         } else {
             LogUtils.d(Logging.LOG_TAG, "Could not remote wipe because not device admin.");
         }

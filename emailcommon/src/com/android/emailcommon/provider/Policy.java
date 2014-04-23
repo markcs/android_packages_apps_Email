@@ -216,6 +216,14 @@ public final class Policy extends EmailContent implements EmailContent.PolicyCol
      * zero out complex characters for simple passwords.
      */
     public void normalize() {
+        mPasswordMode = PASSWORD_MODE_NONE;
+        mRequireRemoteWipe = false;
+        mRequireEncryption = false;
+        mRequireEncryptionExternal = false;
+        mRequireManualSyncWhenRoaming = false;
+        mDontAllowCamera = false;
+        mDontAllowAttachments = false;
+        mDontAllowHtml = false;
         if (mPasswordMode == PASSWORD_MODE_NONE) {
             mPasswordMaxFails = 0;
             mMaxScreenLockTime = 0;
