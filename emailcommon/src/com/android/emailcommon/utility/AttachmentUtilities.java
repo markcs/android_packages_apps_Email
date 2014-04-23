@@ -26,17 +26,15 @@ import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Environment;
 import android.text.TextUtils;
+import android.util.Log;
 import android.webkit.MimeTypeMap;
 
 import com.android.emailcommon.Logging;
 import com.android.emailcommon.provider.EmailContent.Attachment;
 import com.android.emailcommon.provider.EmailContent.AttachmentColumns;
-import com.android.emailcommon.provider.EmailContent.Body;
-import com.android.emailcommon.provider.EmailContent.BodyColumns;
 import com.android.emailcommon.provider.EmailContent.Message;
 import com.android.emailcommon.provider.EmailContent.MessageColumns;
 import com.android.mail.providers.UIProvider;
-import com.android.mail.utils.LogUtils;
 
 import org.apache.commons.io.IOUtils;
 
@@ -44,9 +42,10 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 
 public class AttachmentUtilities {
+    public static final String AUTHORITY = "com.android.email.attachmentprovider";
+    public static final Uri CONTENT_URI = Uri.parse( "content://" + AUTHORITY);
 
     public static final String FORMAT_RAW = "RAW";
     public static final String FORMAT_THUMBNAIL = "THUMBNAIL";
@@ -57,10 +56,6 @@ public class AttachmentUtilities {
         public static final String DISPLAY_NAME = "_display_name";
         public static final String SIZE = "_size";
     }
-
-    private static final String[] ATTACHMENT_CACHED_FILE_PROJECTION = new String[] {
-            AttachmentColumns.CACHED_FILE
-    };
 
     /**
      * The MIME type(s) of attachments we're willing to send via attachments.
@@ -77,8 +72,7 @@ public class AttachmentUtilities {
      * the chooser is only opened with the first item in the list.
      */
     public static final String[] ACCEPTABLE_ATTACHMENT_SEND_UI_TYPES = new String[] {
-        "image/*",
-        "video/*",
+        "*/*",
     };
     /**
      * The MIME type(s) of attachments we're willing to view.
@@ -109,12 +103,7 @@ public class AttachmentUtilities {
      */
     public static final String[] UNACCEPTABLE_ATTACHMENT_EXTENSIONS = new String[] {
         // File types that contain malware
-        "ade", "adp", "bat", "chm", "cmd", "com", "cpl", "dll", "exe",
-        "hta", "ins", "isp", "jse", "lib", "mde", "msc", "msp",
-        "mst", "pif", "scr", "sct", "shb", "sys", "vb", "vbe",
-        "vbs", "vxd", "wsc", "wsf", "wsh",
-        // File types of common compression/container formats (again, to avoid malware)
-        "zip", "gz", "z", "tar", "tgz", "bz2",
+
     };
     /**
      * Filename extensions of attachments that can be installed.
@@ -130,25 +119,36 @@ public class AttachmentUtilities {
      * so we should probably factor that in. A 5MB attachment will generally be around
      * 6.8MB downloaded but only 5MB saved.
      */
-    public static final int MAX_ATTACHMENT_DOWNLOAD_SIZE = (5 * 1024 * 1024);
+    public static final int MAX_ATTACHMENT_DOWNLOAD_SIZE = (10 * 1024 * 1024);
     /**
      * The maximum size of an attachment we're willing to upload (measured as stored on disk).
      * Attachments that are base64 encoded (most) will be about 1.375x their actual size
      * so we should probably factor that in. A 5MB attachment will generally be around
      * 6.8MB uploaded.
      */
-    public static final int MAX_ATTACHMENT_UPLOAD_SIZE = (5 * 1024 * 1024);
+    public static final int MAX_ATTACHMENT_UPLOAD_SIZE = (10 * 1024 * 1024);
+    /**
+     * The attachment has no size and upload is not allowed.
+     */
+    public static final int ATTACHMENT_UPLOAD_NO_SIZE = -1;
 
-    private static Uri sUri;
     public static Uri getAttachmentUri(long accountId, long id) {
-        if (sUri == null) {
-            sUri = Uri.parse(Attachment.ATTACHMENT_PROVIDER_URI_PREFIX);
-        }
-        return sUri.buildUpon()
-                .appendPath(Long.toString(accountId))
-                .appendPath(Long.toString(id))
-                .appendPath(FORMAT_RAW)
-                .build();
+        return CONTENT_URI.buildUpon()
+        .appendPath(Long.toString(accountId))
+        .appendPath(Long.toString(id))
+        .appendPath(FORMAT_RAW)
+        .build();
+    }
+
+    public static Uri getAttachmentThumbnailUri(long accountId, long id,
+            int width, int height) {
+        return CONTENT_URI.buildUpon()
+        .appendPath(Long.toString(accountId))
+        .appendPath(Long.toString(id))
+        .appendPath(FORMAT_THUMBNAIL)
+        .appendPath(Integer.toString(width))
+        .appendPath(Integer.toString(height))
+        .build();
     }
 
     /**
@@ -234,6 +234,24 @@ public class AttachmentUtilities {
     }
 
     /**
+     * @return mime-type for a {@link Uri}.
+     *    - Use {@link ContentResolver#getType} for a content: URI.
+     *    - Use {@link #inferMimeType} for a file: URI.
+     *    - Otherwise returns null.
+     */
+    public static String inferMimeTypeForUri(Context context, Uri uri) {
+        final String scheme = uri.getScheme();
+        if (ContentResolver.SCHEME_CONTENT.equals(scheme)) {
+            return context.getContentResolver().getType(uri);
+        } else if (ContentResolver.SCHEME_FILE.equals(scheme)) {
+            return inferMimeType(uri.getLastPathSegment(), "");
+        } else {
+            Log.e(Logging.LOG_TAG, "Unable to determine MIME type for uri=" + uri, new Error());
+            return null;
+        }
+    }
+
+    /**
      * Extract and return filename's extension, converted to lower case, and not including the "."
      *
      * @return extension, or null if not found (or null/empty filename)
@@ -304,34 +322,6 @@ public class AttachmentUtilities {
     }
 
     /**
-     * In support of deleting a message, find all attachments and delete associated cached
-     * attachment files.
-     * @param context
-     * @param accountId the account for the message
-     * @param messageId the message
-     */
-    public static void deleteAllCachedAttachmentFiles(Context context, long accountId,
-            long messageId) {
-        final Uri uri = ContentUris.withAppendedId(Attachment.MESSAGE_ID_URI, messageId);
-        final Cursor c = context.getContentResolver().query(uri, ATTACHMENT_CACHED_FILE_PROJECTION,
-                null, null, null);
-        try {
-            while (c.moveToNext()) {
-                final String fileName = c.getString(0);
-                if (!TextUtils.isEmpty(fileName)) {
-                    final File cachedFile = new File(fileName);
-                    // Note, delete() throws no exceptions for basic FS errors (e.g. file not found)
-                    // it just returns false, which we ignore, and proceed to the next file.
-                    // This entire loop is best-effort only.
-                    cachedFile.delete();
-                }
-            }
-        } finally {
-            c.close();
-        }
-    }
-
-    /**
      * In support of deleting a mailbox, find all messages and delete their attachments.
      *
      * @param context
@@ -365,12 +355,13 @@ public class AttachmentUtilities {
         for (File file : files) {
             boolean result = file.delete();
             if (!result) {
-                LogUtils.e(Logging.LOG_TAG, "Failed to delete attachment file " + file.getName());
+                Log.e(Logging.LOG_TAG, "Failed to delete attachment file " + file.getName());
             }
         }
     }
 
-    private static long copyFile(InputStream in, OutputStream out) throws IOException {
+    private static long copyFile(InputStream in, File file) throws IOException {
+        FileOutputStream out = new FileOutputStream(file);
         long size = IOUtils.copy(in, out);
         in.close();
         out.flush();
@@ -386,27 +377,24 @@ public class AttachmentUtilities {
         ContentValues cv = new ContentValues();
         long attachmentId = attachment.mId;
         long accountId = attachment.mAccountKey;
-        String contentUri = null;
+        String contentUri;
         long size;
         try {
-            ContentResolver resolver = context.getContentResolver();
             if (attachment.mUiDestination == UIProvider.AttachmentDestination.CACHE) {
-                Uri attUri = getAttachmentUri(accountId, attachmentId);
-                size = copyFile(in, resolver.openOutputStream(attUri));
-                contentUri = attUri.toString();
-            } else if (Utility.isExternalStorageMounted()) {
-                if (attachment.mFileName == null) {
-                    // TODO: This will prevent a crash but does not surface the underlying problem
-                    // to the user correctly.
-                    LogUtils.w(Logging.LOG_TAG, "Trying to save an attachment with no name: %d",
-                            attachmentId);
-                    throw new IOException("Can't save an attachment with no name");
+                File saveIn = getAttachmentDirectory(context, accountId);
+                if (!saveIn.exists()) {
+                    saveIn.mkdirs();
                 }
+                File file = getAttachmentFilename(context, accountId, attachmentId);
+                file.createNewFile();
+                size = copyFile(in, file);
+                contentUri = getAttachmentUri(accountId, attachmentId).toString();
+            } else if (Utility.isExternalStorageMounted()) {
                 File downloads = Environment.getExternalStoragePublicDirectory(
                         Environment.DIRECTORY_DOWNLOADS);
                 downloads.mkdirs();
                 File file = Utility.createUniqueFile(downloads, attachment.mFileName);
-                size = copyFile(in, new FileOutputStream(file));
+                size = copyFile(in, file);
                 String absolutePath = file.getAbsolutePath();
 
                 // Although the download manager can scan media files, scanning only happens
@@ -425,8 +413,7 @@ public class AttachmentUtilities {
                 contentUri = dm.getUriForDownloadedFile(id).toString();
 
             } else {
-                LogUtils.w(Logging.LOG_TAG,
-                        "Trying to save an attachment without external storage?");
+                Log.w(Logging.LOG_TAG, "Trying to save an attachment without external storage?");
                 throw new IOException();
             }
 
@@ -440,20 +427,5 @@ public class AttachmentUtilities {
         }
         context.getContentResolver().update(uri, cv, null, null);
 
-        // If this is an inline attachment, update the body
-        if (contentUri != null && attachment.mContentId != null) {
-            Body body = Body.restoreBodyWithMessageId(context, attachment.mMessageKey);
-            if (body != null && body.mHtmlContent != null) {
-                cv.clear();
-                String html = body.mHtmlContent;
-                String contentIdRe =
-                        "\\s+(?i)src=\"cid(?-i):\\Q" + attachment.mContentId + "\\E\"";
-                String srcContentUri = " src=\"" + contentUri + "\"";
-                html = html.replaceAll(contentIdRe, srcContentUri);
-                cv.put(BodyColumns.HTML_CONTENT, html);
-                context.getContentResolver().update(
-                        ContentUris.withAppendedId(Body.CONTENT_URI, body.mId), cv, null, null);
-            }
-        }
     }
 }
