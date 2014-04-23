@@ -40,8 +40,11 @@ public final class Policy extends EmailContent implements EmailContent.PolicyCol
     public static final String TAG = "Email/Policy";
 
     public static final String TABLE_NAME = "Policy";
-    @SuppressWarnings("hiding")
-    public static final Uri CONTENT_URI = Uri.parse(EmailContent.CONTENT_URI + "/policy");
+    public static Uri CONTENT_URI;
+
+    public static void initPolicy() {
+        CONTENT_URI = Uri.parse(EmailContent.CONTENT_URI + "/policy");
+    }
 
     /* Convert days to mSec (used for password expiration) */
     private static final long DAYS_TO_MSEC = 24 * 60 * 60 * 1000;
@@ -213,15 +216,6 @@ public final class Policy extends EmailContent implements EmailContent.PolicyCol
      * zero out complex characters for simple passwords.
      */
     public void normalize() {
-        mPasswordMode = PASSWORD_MODE_NONE;
-        mRequireRemoteWipe = false;
-        mRequireEncryption = false;
-        mRequireEncryptionExternal = false;
-        mRequireManualSyncWhenRoaming = false;
-        mDontAllowCamera = false;
-        mDontAllowAttachments = false;
-        mDontAllowHtml = false;
-
         if (mPasswordMode == PASSWORD_MODE_NONE) {
             mPasswordMaxFails = 0;
             mMaxScreenLockTime = 0;
@@ -391,7 +385,7 @@ public final class Policy extends EmailContent implements EmailContent.PolicyCol
         return result;
     }
 
-    private void appendPolicy(StringBuilder sb, String code, int value) {
+    private static void appendPolicy(StringBuilder sb, String code, int value) {
         sb.append(code);
         sb.append(":");
         sb.append(value);
@@ -450,10 +444,12 @@ public final class Policy extends EmailContent implements EmailContent.PolicyCol
      * Supports Parcelable
      */
     public static final Parcelable.Creator<Policy> CREATOR = new Parcelable.Creator<Policy>() {
+        @Override
         public Policy createFromParcel(Parcel in) {
             return new Policy(in);
         }
 
+        @Override
         public Policy[] newArray(int size) {
             return new Policy[size];
         }
